@@ -28,23 +28,51 @@ st.sidebar.markdown("### 파일 업로드")
 # 파일 업로드
 uploaded_file = st.sidebar.file_uploader(
     "FITS 파일을 선택하세요",
-    type=['fits', 'fit'],
-    help="별의 스펙트럼 데이터가 포함된 FITS 파일을 업로드하세요"
+    type=['fits', 'fit', 'fz', 'fits.fz'],
+    help="별의 스펙트럼 데이터가 포함된 FITS 파일을 업로드하세요 (.fits, .fit, .fz, .fits.fz 지원)"
 )
 
 # 메인 함수들
 def analyze_fits_file(file):
     """FITS 파일을 분석하여 기본 정보 추출"""
     try:
-        # FITS 파일 읽기
+        # FITS 파일 읽기 (압축된 파일도 자동 처리)
+        # astropy는 .fits.fz 파일을 자동으로 압축해제합니다
         hdul = fits.open(file)
         
-        # 헤더 정보 추출
-        header = hdul[0].header
-        data = hdul[0].data
+        # 여러 HDU가 있을 수 있으므로 데이터가 있는 HDU 찾기
+        header = None
+        data = None
+        
+        for i, hdu in enumerate(hdul):
+            if hdu.header is not None:
+                if header is None:  # 첫 번째 헤더 저장
+                    header = hdu.header
+                if hdu.data is not None and data is None:  # 첫 번째 데이터 저장
+                    data = hdu.data
+                    
+        # 기본값 설정
+        if header is None:
+            header = hdul[0].header
+        if data is None:
+            data = hdul[0].data
         
         # 기본 정보 추출
         info = {}
+        
+        # 파일 정보 추가
+        info['파일명'] = file.name if hasattr(file, 'name') else "업로드된 파일"
+        info['파일 형식'] = "압축된 FITS" if file.name.endswith('.fz') else "FITS" if hasattr(file, 'name') else "FITS"
+        
+        # HDU 정보 추가
+        info['HDU 개수'] = len(hdul)
+        if data is not None:
+            if len(data.shape) == 1:
+                info['데이터 형태'] = f"1차원 ({data.shape[0]} 포인트)"
+            elif len(data.shape) == 2:
+                info['데이터 형태'] = f"2차원 ({data.shape[0]} × {data.shape[1]})"
+            else:
+                info['데이터 형태'] = f"{len(data.shape)}차원 {data.shape}"
         
         # 일반적인 FITS 헤더 키들
         common_keys = {
@@ -56,20 +84,47 @@ def analyze_fits_file(file):
             'TELESCOPE': '망원경',
             'INSTRUME': '기기',
             'FILTER': '필터',
-            'AIRMASS': '대기질량'
+            'AIRMASS': '대기질량',
+            'OBSERVER': '관측자',
+            'SITE': '관측지',
+            'CRVAL1': '중심 파장',
+            'CDELT1': '파장 간격',
+            'NAXIS1': '스펙트럼 픽셀 수',
+            'NAXIS2': '공간 픽셀 수'
         }
         
         for key, description in common_keys.items():
             if key in header:
-                info[description] = header[key]
+                value = header[key]
+                # 값 포맷팅
+                if isinstance(value, float):
+                    if key in ['RA', 'DEC']:
+                        info[description] = f"{value:.6f}°"
+                    elif key in ['EXPTIME']:
+                        info[description] = f"{value:.1f}초"
+                    elif key in ['CRVAL1', 'CDELT1']:
+                        info[description] = f"{value:.4f}"
+                    else:
+                        info[description] = f"{value:.3f}"
+                else:
+                    info[description] = str(value)
         
         # 좌표 정보가 있으면 변환
         if 'RA' in header and 'DEC' in header:
             try:
-                coord = SkyCoord(ra=header['RA']*u.degree, dec=header['DEC']*u.degree)
+                # RA, DEC이 도 단위인지 시간 단위인지 확인
+                ra_val = header['RA']
+                dec_val = header['DEC']
+                
+                # 일반적으로 RA는 0-360도 또는 0-24시간
+                if ra_val > 24:  # 도 단위
+                    coord = SkyCoord(ra=ra_val*u.degree, dec=dec_val*u.degree)
+                else:  # 시간 단위일 가능성
+                    coord = SkyCoord(ra=ra_val*u.hour, dec=dec_val*u.degree)
+                    
                 info['좌표 (J2000)'] = coord.to_string('hmsdms')
-            except:
-                pass
+            except Exception as coord_error:
+                info['좌표 변환 오류'] = str(coord_error)
         
         hdul.close()
         return info, data, header
@@ -115,19 +170,41 @@ def analyze_spectrum(data):
     if data is None:
         return None
     
-    # 1차원 데이터로 변환
-    if len(data.shape) > 1:
-        spectrum = np.mean(data, axis=0)
+    # 데이터 타입과 차원 확인
+    original_shape = data.shape
+    
+    # 다차원 데이터 처리
+    if len(data.shape) > 2:
+        # 3차원 이상인 경우 첫 번째 슬라이스 사용
+        data = data[0] if data.shape[0] < data.shape[-1] else data.reshape(-1, data.shape[-1])
+    
+    # 2차원 데이터 처리
+    if len(data.shape) == 2:
+        # 가로가 더 긴 경우 세로 평균, 세로가 더 긴 경우 가로 평균
+        if data.shape[1] > data.shape[0]:
+            spectrum = np.mean(data, axis=0)
+        else:
+            spectrum = np.mean(data, axis=1)
     else:
         spectrum = data
     
+    # NaN이나 무한대 값 처리
+    spectrum = spectrum[~np.isnan(spectrum)]
+    spectrum = spectrum[~np.isinf(spectrum)]
+    
+    if len(spectrum) == 0:
+        return None
+    
     # 기본 통계
     stats = {
+        '원본 데이터 형태': str(original_shape),
+        '처리된 스펙트럼 길이': len(spectrum),
         '최대값': np.max(spectrum),
         '최소값': np.min(spectrum),
         '평균값': np.mean(spectrum),
+        '중간값': np.median(spectrum),
         '표준편차': np.std(spectrum),
-        '데이터 포인트 수': len(spectrum)
+        '데이터 타입': str(spectrum.dtype)
     }
     
     return spectrum, stats
@@ -208,14 +285,25 @@ if uploaded_file is not None:
             if spectrum_result is not None:
                 spectrum, stats = spectrum_result
                 
+                # 파장 축 생성 (헤더에 정보가 있으면 사용, 없으면 기본값)
+                if 'CRVAL1' in header and 'CDELT1' in header:
+                    # WCS 정보가 있는 경우
+                    start_wave = header['CRVAL1']
+                    delta_wave = header['CDELT1']
+                    wavelength = start_wave + np.arange(len(spectrum)) * delta_wave
+                    wave_unit = "Å" if start_wave > 1000 else "nm"
+                else:
+                    # 기본 가시광선 범위
+                    wavelength = np.linspace(400, 700, len(spectrum))
+                    wave_unit = "nm"
+                
                 # 스펙트럼 플롯
                 fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(10, 8))
                 
                 # 원본 스펙트럼
-                wavelength = np.linspace(400, 700, len(spectrum))  # 가시광선 범위 (nm)
                 ax1.plot(wavelength, spectrum, 'b-', linewidth=1)
-                ax1.set_title('원본 스펙트럼')
-                ax1.set_xlabel('파장 (nm)')
+                ax1.set_title(f'원본 스펙트럼 - {info.get("천체명", "Unknown")}')
+                ax1.set_xlabel(f'파장 ({wave_unit})')
                 ax1.set_ylabel('강도')
                 ax1.grid(True, alpha=0.3)
                 
@@ -224,7 +312,7 @@ if uploaded_file is not None:
                 ax2.plot(doppler_wavelength, spectrum, 'r-', linewidth=1, label='도플러 효과 적용')
                 ax2.plot(wavelength, spectrum, 'b--', alpha=0.5, label='원본')
                 ax2.set_title('도플러 효과가 적용된 스펙트럼')
-                ax2.set_xlabel('파장 (nm)')
+                ax2.set_xlabel(f'파장 ({wave_unit})')
                 ax2.set_ylabel('강도')
                 ax2.legend()
                 ax2.grid(True, alpha=0.3)
@@ -245,12 +333,18 @@ if uploaded_file is not None:
                 st.write(f"**도플러 편이 (Δλ/λ):** {doppler_shift:.6f}")
                 
                 if radial_velocity != 0:
-                    # 특정 파장에서의 편이량 계산 (예: 550nm - 녹색광)
-                    reference_wavelength = 550  # nm
+                    # 특정 파장에서의 편이량 계산
+                    if wave_unit == "Å":
+                        reference_wavelength = 5500  # Angstrom
+                        unit_text = "Å"
+                    else:
+                        reference_wavelength = 550  # nm
+                        unit_text = "nm"
+                        
                     shifted_wavelength = reference_wavelength * (1 + doppler_shift)
                     wavelength_change = shifted_wavelength - reference_wavelength
                     
-                    st.write(f"**기준 파장 (550nm)에서의 편이량:** {wavelength_change:.4f} nm")
+                    st.write(f"**기준 파장 ({reference_wavelength}{unit_text})에서의 편이량:** {wavelength_change:.4f} {unit_text}")
                     
                     if radial_velocity > 0:
                         st.write("🔴 적색편이 - 파장이 길어짐")
@@ -272,20 +366,26 @@ else:
     
     ### 📋 주요 기능
     
-    1. **기본 정보 추출**
+    1. **FITS 파일 지원**
+       - 일반 FITS 파일 (.fits, .fit)
+       - 압축된 FITS 파일 (.fz, .fits.fz)
+       - 다차원 데이터 자동 처리
+    
+    2. **기본 정보 추출**
        - 천체명, 좌표, 관측 정보 등
        - FITS 헤더에서 자동 추출
+       - 파장 정보 (WCS) 자동 인식
     
-    2. **거리 계산**
+    3. **거리 계산**
        - 겉보기 등급과 분광형을 이용한 거리 추정
        - 파섹과 광년 단위로 표시
     
-    3. **도플러 효과 분석**
+    4. **도플러 효과 분석**
        - 시선속도에 따른 스펙트럼 변화
        - 적색편이/청색편이 시각화
        - 파장 편이량 계산
     
-    4. **스펙트럼 분석**
+    5. **스펙트럼 분석**
        - 원본 스펙트럼 표시
        - 도플러 효과 적용된 스펙트럼 비교
        - 통계 정보 제공
@@ -293,6 +393,8 @@ else:
     ### 🚀 시작하기
     
     1. **왼쪽 사이드바**에서 FITS 파일을 업로드하세요
+       - 일반 FITS 파일: `.fits`, `.fit`
+       - 압축된 FITS 파일: `.fz`, `.fits.fz`
     2. **별의 정보**를 입력하세요 (겉보기 등급, 분광형, 시선속도)
     3. **자동 분석** 결과를 확인하세요
     
