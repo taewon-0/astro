@@ -609,21 +609,29 @@ else:
        - 원본 스펙트럼 표시
        - 색온도와 별의 색상 추정
        - 통계 정보 제공
+    """)
     
-    ### 🚀 시작하기
-    
+    st.subheader("🚀 시작하기")
+    st.markdown("""
     1. **왼쪽 사이드바**에서 FITS 파일을 업로드하세요
        - 일반 FITS 파일: `.fits`, `.fit`
        - 압축된 FITS 파일: `.fz`, `.fits.fz`
     2. **별의 정보**를 입력하세요 (겉보기 등급, 분광형, 관측 날짜)
     3. **자동 분석** 결과를 확인하세요
+    """)
     
-    ### 📖 참고 사항
-    
+    st.subheader("📖 참고 사항")
+    st.markdown("""
     - **분광형**: O, B, A, F, G, K, M 순으로 온도가 낮아집니다
     - **거리 계산**: 거리 모듈러스 공식을 사용합니다
     - **관측 계획**: 서울 기준 최적 관측 시간을 계산합니다
     - **고도각**: 30도 이상이면 좋은 관측 조건입니다
+    """)
+    
+    st.subheader("🎯 교육 목적")
+    st.markdown("""
+    이 도구는 지구과학 교육을 위해 설계되었으며, 실제 천체 관측 데이터 분석의 기본 원리를 학습할 수 있습니다.
+    """)
     
     # 샘플 데이터 정보
     st.markdown("---")
@@ -644,6 +652,6 @@ else:
 st.markdown("---")
 st.markdown("""
 <div style='text-align: center; color: #666; font-size: 0.9em;'>
-     별 분석 도구 | 지구과학2 프로젝트 | Made with Streamlit
+    ⭐ 별 분석 도구 | 지구과학2 프로젝트 | Made with Streamlit
 </div>
-"", unsafe_allow_html=True)
+""", unsafe_allow_html=True)
