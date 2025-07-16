@@ -1,45 +1,4 @@
-2. **별의 정보**를 입력하세요 (겉보기 등급, 분광형, 관측 날짜)
-    3. **자동 분석** 결과를 확인하세요
-    
-    ### 📖 참고 사항
-    
-    - **분광형**: O, B, A, F, G, K, M 순으로 온도가 낮아집니다
-    - **거리 계산**: 거리 모듈러스 공식을 사용합니다
-    - **관측 계획**: 서울 기준 최적 관측 시간을 계산합니다def analyze_radial_velocity_from_spectrum(data, header):
-    """스펙트럼에서 시선속도 분석 시도 (실험적)"""
-    try:
-        # 스펙트럼 데이터 준비
-        spectrum_result = analyze_spectrum(data)
-        if spectrum_result is None:
-            return 0.0
-            
-        spectrum, _ = spectrum_result
-        
-        # 파장 축 생성
-        if 'CRVAL1' in header and 'CDELT1' in header:
-            start_wave = header['CRVAL1']
-            delta_wave = header['CDELT1']
-            wavelength = start_wave + np.arange(len(spectrum)) * delta_wave
-        else:
-            # 기본 파장 범위 (가시광선)
-            wavelength = np.linspace(400, 700, len(spectrum))
-        
-        # 주요 흡수선들의 정지 파장 (nm)
-        reference_lines = {
-            'H-alpha': 656.28,
-            'H-beta': 486.13,
-            'H-gamma': 434.05,
-            'Ca II K': 393.37,
-            'Ca II H': 396.85,
-            'Na D1': 589.59,
-            'Na D2': 588.99
-        }
-        
-        detected_velocities = []
-        
-        # 각 흡수선에 대해 분석
-        for line_name, rest_wavelength in reference_lines.items():
-            # 해당 파장 범위가 스펙트import streamlit as st
+import streamlit as st
 import numpy as np
 import matplotlib.pyplot as plt
 from astropy.io import fits
@@ -142,7 +101,7 @@ def analyze_fits_file(file):
                 # 값 포맷팅
                 if isinstance(value, float):
                     if key in ['RA', 'DEC']:
-                        info[description] = f"{value:.6f}°"
+                        info[description] = f"{value:.6f}도"
                     elif key in ['EXPTIME']:
                         info[description] = f"{value:.1f}초"
                     elif key in ['CRVAL1', 'CDELT1']:
@@ -198,15 +157,97 @@ def simulate_stellar_distance(magnitude, spectral_type='G'):
     
     return distance_pc, distance_ly
 
-def simulate_doppler_effect(wavelength_data, velocity_km_s):
-    """도플러 효과 시뮬레이션"""
-    c = 299792.458  # 광속 (km/s)
+def calculate_visibility(ra, dec, date_str=None):
+    """서울에서의 별 관측 가능성 계산"""
+    try:
+        # 서울 위치 설정
+        seoul = EarthLocation(lat=37.5665*u.deg, lon=126.9780*u.deg, height=38*u.m)
+        
+        # 날짜 설정 (기본값: 오늘)
+        if date_str is None:
+            date_str = datetime.now().strftime('%Y-%m-%d')
+        
+        # 날짜 객체 생성 (UTC+9 시간대 고려)
+        date_obj = datetime.strptime(date_str, '%Y-%m-%d')
+        
+        # 별의 좌표
+        if isinstance(ra, str) and isinstance(dec, str):
+            # 문자열 형태의 좌표인 경우
+            target = SkyCoord(ra=ra, dec=dec, unit=(u.hourangle, u.deg))
+        else:
+            # 도 단위 좌표인 경우
+            target = SkyCoord(ra=ra*u.deg, dec=dec*u.deg)
+        
+        # 하루 동안의 시간 배열 (30분 간격)
+        times = []
+        altitudes = []
+        azimuths = []
+        
+        for hour in np.arange(0, 24, 0.5):
+            # 한국 시간 (UTC+9) 고려
+            time_point = date_obj + timedelta(hours=hour)
+            astro_time = Time(time_point) + 9*u.hour  # UTC+9
+            
+            # 고도각과 방위각 계산
+            altaz = target.transform_to(AltAz(obstime=astro_time, location=seoul))
+            
+            times.append(hour)
+            altitudes.append(altaz.alt.deg)
+            azimuths.append(altaz.az.deg)
+        
+        return times, altitudes, azimuths, target
     
-    # 도플러 공식: λ_observed = λ_rest * (1 + v/c)
-    # v > 0: 적색편이 (멀어짐), v < 0: 청색편이 (다가옴)
-    doppler_factor = 1 + velocity_km_s / c
+    except Exception as e:
+        return None, None, None, None
+
+def get_visibility_info(altitudes, times):
+    """관측 가능성 정보 추출"""
+    altitudes = np.array(altitudes)
+    times = np.array(times)
     
-    return wavelength_data * doppler_factor
+    # 지평선 위에 있는 시간 찾기
+    visible_indices = altitudes > 0
+    
+    if not np.any(visible_indices):
+        return "관측 불가능", "없음", "없음", 0, 0
+    
+    visible_times = times[visible_indices]
+    visible_alts = altitudes[visible_indices]
+    
+    # 최고 고도와 시간
+    max_alt_idx = np.argmax(visible_alts)
+    best_time = visible_times[max_alt_idx]
+    best_altitude = visible_alts[max_alt_idx]
+    
+    # 관측 시간 범위
+    rise_time = visible_times[0]
+    set_time = visible_times[-1]
+    
+    # 시간 포맷팅
+    def format_time(hour):
+        h = int(hour)
+        m = int((hour - h) * 60)
+        return f"{h:02d}:{m:02d}"
+    
+    if best_altitude > 60:
+        quality = "매우 좋음"
+    elif best_altitude > 30:
+        quality = "좋음"
+    elif best_altitude > 15:
+        quality = "보통"
+    else:
+        quality = "어려움"
+    
+    time_range = f"{format_time(rise_time)} - {format_time(set_time)}"
+    best_time_str = format_time(best_time)
+    
+    return quality, time_range, best_time_str, best_altitude, len(visible_times) * 0.5
+
+def get_direction_from_azimuth(azimuth):
+    """방위각을 방향으로 변환"""
+    directions = ["북", "북동", "동", "남동", "남", "남서", "서", "북서"]
+    idx = round(azimuth / 45) % 8
+    return directions[idx]
 
 def analyze_spectrum(data):
     """스펙트럼 데이터 분석"""
@@ -290,37 +331,13 @@ if uploaded_file is not None:
                 help="별의 분광형을 선택하세요"
             )
             
-            # 시선속도 입력
-            # 시선속도 입력
-            st.markdown("**시선속도 분석**")
-            analysis_mode = st.radio(
-                "분석 방법 선택:",
-                ["수동 입력", "자동 분석 (실험적)"],
-                help="수동 입력: 직접 값 입력, 자동 분석: 스펙트럼에서 흡수선 분석 시도"
+            # 관측 날짜 선택
+            st.subheader("🌃 관측 계획")
+            observation_date = st.date_input(
+                "관측 희망 날짜",
+                value=datetime.now().date(),
+                help="서울에서 관측하고 싶은 날짜를 선택하세요"
             )
-            
-            if analysis_mode == "수동 입력":
-                radial_velocity = st.slider(
-                    "시선속도 (km/s)",
-                    min_value=-200.0,
-                    max_value=200.0,
-                    value=0.0,
-                    step=1.0,
-                    help="양수: 멀어짐 (적색편이), 음수: 다가옴 (청색편이)"
-                )
-                velocity_source = "사용자 입력"
-            else:
-                # 자동 분석 모드
-                if uploaded_file is not None and data is not None:
-                    radial_velocity = analyze_radial_velocity_from_spectrum(data, header)
-                    velocity_source = "스펙트럼 자동 분석"
-                    st.info(f"자동 분석 결과: {radial_velocity:.1f} km/s")
-                    if radial_velocity == 0:
-                        st.warning("흡수선을 찾을 수 없어 시선속도를 측정할 수 없습니다.")
-                else:
-                    radial_velocity = 0.0
-                    velocity_source = "파일 없음"
-                    st.warning("FITS 파일을 먼저 업로드하세요.")
             
             # 거리 계산
             distance_pc, distance_ly = simulate_stellar_distance(apparent_magnitude, spectral_type)
@@ -342,8 +359,8 @@ if uploaded_file is not None:
                 dec_for_calc = header['DEC']
             elif '적경' in info and '적위' in info:
                 try:
-                    ra_str = info['적경'].replace('°', '')
-                    dec_str = info['적위'].replace('°', '')
+                    ra_str = info['적경'].replace('도', '')
+                    dec_str = info['적위'].replace('도', '')
                     ra_for_calc = float(ra_str)
                     dec_for_calc = float(dec_str)
                 except:
@@ -550,7 +567,7 @@ else:
     
     with st.expander("🌃 관측 조건"):
         st.markdown("""
-        **관측 조건**들을 알아보세요.
+        **좋은 별 관측을 위한 조건**
         
         - **고도각**: 지평선으로부터의 각도
           - 30도 이상: 좋은 관측 조건
@@ -568,65 +585,10 @@ else:
     # 기존 주요 기능 설명
     st.subheader("📋 주요 기능")
     
+    st.markdown("""
     1. **FITS 파일 지원**
        - 일반 FITS 파일 (.fits, .fit)
        - 압축된 FITS 파일 (.fz, .fits.fz)
        - 다차원 데이터 자동 처리
     
-    2. **기본 정보 추출**
-       - 천체명, 좌표, 관측 정보 등
-       - FITS 헤더에서 자동 추출
-       - 파장 정보 (WCS) 자동 인식
-    
-    3. **거리 계산**
-       - 겉보기 등급과 분광형을 이용한 거리 추정
-       - 파섹과 광년 단위로 표시
-    
-    4. **서울에서의 관측 가능성**
-       - 선택한 날짜의 별 관측 조건 분석
-       - 최적 관측 시간과 방향 제시
-       - 고도각 변화 그래프 제공
-    
-    5. **스펙트럼 분석**
-       - 원본 스펙트럼 표시
-       - 색온도와 별의 색상 추정
-       - 통계 정보 제공
-    
-    ### 🚀 시작하기
-    
-    1. **왼쪽 사이드바**에서 FITS 파일을 업로드하세요
-       - 일반 FITS 파일: `.fits`, `.fit`
-       - 압축된 FITS 파일: `.fz`, `.fits.fz`
-    2. **별의 정보**를 입력하세요 (겉보기 등급, 분광형, 관측 날짜)
-    3. **자동 분석** 결과를 확인하세요
-    
-    ### 📖 참고 사항
-    
-    - **분광형**: O, B, A, F, G, K, M 순으로 온도가 낮아집니다
-    - **거리 계산**: 거리 모듈러스 공식을 사용합니다
-    - **관측 계획**: 서울 기준 최적 관측 시간을 계산합니다
-    - **고도각**: 30도 이상이면 좋은 관측 조건입니다
-    
-
-    # 샘플 데이터 정보
-    st.markdown("---")
-    st.subheader("💡 팁")
-    st.info("""
-    **FITS 파일이 없다면:**
-    - NASA의 MAST Archive에서 샘플 데이터 다운로드
-    - ESO Science Archive 이용
-    - 각 천문대의 공개 데이터 아카이브 활용
-    
-    **좋은 관측을 위해:**
-    - 달이 없는 밤 선택
-    - 도시 외곽의 어두운 곳
-    - 맑은 날씨 확인
-    """)
-
-# 푸터
-st.markdown("---")
-st.markdown("""
-<div style='text-align: center; color: #666; font-size: 0.9em;'>
-    ⭐ 별 분석 도구 | 지구과학2 프로젝트 | Made with Streamlit
-</div>
-""", unsafe_allow_html=True)
+    2. **기
