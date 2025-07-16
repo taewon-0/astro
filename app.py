@@ -646,4 +646,4 @@ st.markdown("""
 <div style='text-align: center; color: #666; font-size: 0.9em;'>
      별 분석 도구 | 지구과학2 프로젝트 | Made with Streamlit
 </div>
-""", unsafe_allow_html=True)
+"", unsafe_allow_html=True)
