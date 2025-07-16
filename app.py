@@ -366,7 +366,7 @@ if uploaded_file is not None:
                         st.success(f"**관측 품질:** {quality}")
                         st.write(f"**관측 가능 시간:** {time_range}")
                         st.write(f"**최적 관측 시간:** {best_time}")
-                        st.write(f"**최고 고도:** {best_alt:.1f}°")
+                        st.write(f"**최고 고도:** {best_alt:.1f}도")
                         st.write(f"**최적 관측 방향:** {best_direction}")
                         st.write(f"**관측 지속 시간:** {duration:.1f}시간")
                         
@@ -407,7 +407,7 @@ if uploaded_file is not None:
                             st.success(f"**관측 품질:** {quality}")
                             st.write(f"**관측 가능 시간:** {time_range}")
                             st.write(f"**최적 관측 시간:** {best_time}")
-                            st.write(f"**최고 고도:** {best_alt:.1f}°")
+                            st.write(f"**최고 고도:** {best_alt:.1f}도")
                         else:
                             st.error("**관측 불가능:** 이 날짜에는 별이 지평선 위로 올라오지 않습니다.")
         
@@ -550,11 +550,11 @@ else:
     
     with st.expander("🌃 관측 조건"):
         st.markdown("""
-        **좋은 별 관측을 위한 조건**
+        **관측 조건**들을 알아보세요.
         
         - **고도각**: 지평선으로부터의 각도
-          - 30° 이상: 좋은 관측 조건
-          - 60° 이상: 매우 좋은 관측 조건
+          - 30도 이상: 좋은 관측 조건
+          - 60도 이상: 매우 좋은 관측 조건
         
         - **방향**: 8방위로 표시
           - 북쪽: 북극성 방향
@@ -605,9 +605,9 @@ else:
     - **분광형**: O, B, A, F, G, K, M 순으로 온도가 낮아집니다
     - **거리 계산**: 거리 모듈러스 공식을 사용합니다
     - **관측 계획**: 서울 기준 최적 관측 시간을 계산합니다
-    - **고도각**: 30° 이상이면 좋은 관측 조건입니다
+    - **고도각**: 30도 이상이면 좋은 관측 조건입니다
     
-    
+
     # 샘플 데이터 정보
     st.markdown("---")
     st.subheader("💡 팁")
