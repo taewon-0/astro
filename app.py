@@ -51,7 +51,6 @@ from scipy.optimize import curve_fit
 import io
 import warnings
 from datetime import datetime, timedelta
-import pytz
 warnings.filterwarnings('ignore')
 
 # 페이지 설정
@@ -607,6 +606,7 @@ else:
     - **거리 계산**: 거리 모듈러스 공식을 사용합니다
     - **관측 계획**: 서울 기준 최적 관측 시간을 계산합니다
     - **고도각**: 30° 이상이면 좋은 관측 조건입니다
+    
     
     # 샘플 데이터 정보
     st.markdown("---")
